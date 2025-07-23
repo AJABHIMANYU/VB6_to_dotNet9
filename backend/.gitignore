@@ -1,0 +1,74 @@
+# --- Python Virtual Environment ---
+# Ignore the virtual environment folder to avoid committing packages.
+venv/
+.venv/
+env/
+.env/
+
+# --- Python Cache & Artifacts ---
+# Ignore bytecode and compiled files.
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+*.so
+
+# --- Application-Specific Generated Files & Caches ---
+# These are the files and directories YOUR application creates.
+# They should not be part of the source code repository.
+
+# Log files
+logs/
+*.log
+
+# Generated data directory containing the database and RAG index
+data/
+analysis.db
+*.sqlite3
+rag_index.faiss
+rag_metadata.pkl
+
+# fcache directory
+vb6_source_cache/
+
+# Temporary directory for code validation
+temp_migration/
+
+# Final output ZIP file
+migration_output.zip
+*.zip
+
+# --- Secrets & Credentials ---
+# CRITICAL: Never commit your .env file containing API keys and secrets.
+.env
+.env.*
+# But do commit a template file if you have one, e.g. .env.example
+
+# --- IDE & Editor Configuration ---
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+
+# JetBrains / PyCharm
+.idea/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# --- Operating System Files ---
+# macOS
+.DS_Store
+._*
+
+# Windows
+Thumbs.db
+desktop.ini

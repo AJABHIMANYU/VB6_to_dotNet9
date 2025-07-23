@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+openai  # Or openai for Azure OpenAI client
+gitpython        # For repo cloning
+pydantic         # For validations
+sqlalchemy       # For SQLite ORM
+faiss-cpu        # Or chromadb for RAG
+pyyaml           # For loading prompts.yml
+sqlglot          # Optional for SQL parsing in schema_parser
+mysql-connector-python
+sentence-transformers
+python-dotenv
+certifi
+fcache

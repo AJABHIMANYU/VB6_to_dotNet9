@@ -1,0 +1,133 @@
+analyze_vb6: |
+  Analyze the following VB6 parsed data: {parsed_data}
+  Schema: {schema}
+  Dependencies: {dep_graph}
+  Generate a JSON summary with file purpose, functionality, dependencies, .NET mappings, controls, events, ADO queries.
+  Output only valid JSON without any additional text, code blocks, or explanations. Start directly with '{{{{' and end with '}}}}'.
+  Follow this exact structure:
+  {{{{
+    "files": [
+      {{{{
+        "file": "example.frm",
+        "purpose": "Example purpose description",
+        "functionality": "Example functionality description",
+        "dependencies": ["dep1.bas", "dep2.cls"],
+        "netMappings": {{{{"VB.Form": "Razor View", "VB.TextBox": "Input field"}}}},
+        "controls": ["TextBox", "Button"],
+        "events": ["Button_Click", "Form_Load"],
+        "adoQueries": ["SELECT * FROM example_table"]
+      }}}}
+    ]
+  }}}}
+
+propose_architecture: |
+  Based on summary: {summary}
+  Propose .NET 9 MVC architecture JSON: files with paths, types, namespaces; customizations like auth.
+  Output only valid JSON without any additional text, code blocks, or explanations. Start directly with '{{{{' and end with '}}}}'.
+  Follow this exact structure:
+  {{{{
+    "files": [
+      {{{{
+        "file_path": "Controllers/ExampleController.cs",
+        "type": "controller",
+        "namespace": "MyApp.Controllers",
+        "dependencies": ["Models/ExampleModel.cs"]
+      }}}}
+    ],
+    "customizations": {{{{
+      "authentication": true
+    }}}},
+    "ef_core_context": "Data/ApplicationDbContext.cs"
+  }}}}
+
+infer_schema: |
+  Infer MySQL schema from ADO queries: {ado_queries}
+  Output only valid JSON without any additional text, code blocks, or explanations. Start directly with '{{{{' and end with '}}}}'.
+  Follow this exact structure:
+  {{{{
+    "tables": [
+      {{{{
+        "name": "example_table",
+        "columns": [
+          {{{{"name": "id", "type": "INT"}}}},
+          {{{{"name": "name", "type": "VARCHAR(255)"}}}}
+        ]
+      }}}}
+    ]
+  }}}}
+
+analyze_vb6_single_file: |
+  You are a VB6 to .NET expert. Analyze the following single VB6 file and its context.
+  Your output must be a single, valid JSON object, without any surrounding text or code fences.
+
+  Database Schema (for context):
+  {schema}
+
+  File Data to Analyze:
+  {file_data}
+
+  Based on the file data (especially its source code content), determine its purpose, functionality, and how its components would map to .NET.
+
+  Follow this exact JSON structure for your response:
+  {{{{
+    "file": "example.frm",
+    "purpose": "A concise description of what this form is for.",
+    "functionality": "A summary of what the code in this file does.",
+    "dependencies": ["dep1.bas", "dep2.cls"],
+    "netMappings": {{{{
+      "VB.Form": "Razor View", 
+      "VB.TextBox": "Input field"
+    }}}},
+    "controls": ["TextBox", "Button"],
+    "events": ["Button_Click", "Form_Load"],
+    "adoQueries": ["SELECT * FROM example_table"]
+  }}}}
+
+generate_file: |
+  You are an expert .NET 9 and C# developer. Your task is to generate the complete code for a single file based on the provided context.
+
+  Instructions:
+
+  Generate only the raw code for the file specified.
+  Do NOT include any surrounding text, explanations, or markdown code fences (like csharp ...).
+
+  Pay close attention to the target_file_info to determine the correct namespace, class name, and file type (Controller, Model, View, etc.).
+
+  Use the retrieved_rag_context to understand the original VB6 functionality and purpose, and translate that logic into modern .NET 9 code.
+
+  For Models, create properties that match the database schema found in the context.
+
+  For Controllers, create action methods (e.g., Index, Create, Edit) that correspond to the events and functionality of the original VB6 forms.
+
+  For Views (.cshtml), create Razor syntax with HTML and Bootstrap 5 classes that replicates the UI controls from the original VB6 form.
+
+  Context for Code Generation:
+  {context}
+
+refine_code: |
+  You are an expert .NET 9 code debugger. You will be given a set of C# and Razor files that failed to build, along with the exact error messages from the compiler.
+  Your task is to analyze the errors and the provided code, identify the root causes, and provide the corrected versions of ONLY the files that need to be changed.
+
+  Instructions:
+
+  Analyze the build_errors list carefully. Common errors include missing using statements, incorrect namespaces, type mismatches, or syntax errors.
+
+  Review the files_with_code to find the lines causing the errors.
+
+  Your output MUST be a single, valid JSON object.
+
+  The JSON object should contain keys that are the file paths of the files you are correcting (e.g., "Controllers/AccountController.cs").
+
+  The values for each key must be the complete, corrected source code for that file.
+
+  Do NOT include files that do not need to be changed in the final JSON response.
+
+  Do NOT include any surrounding text, explanations, or markdown code fences. Your response must start directly with '{{{{' and end with '}}}}'.
+
+  1. Build Errors to Fix:
+  {errors}
+
+  2. Original Files with Code:
+  {files}
+
+  Now, provide the JSON object containing only the corrected file(s).
