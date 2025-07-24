@@ -21,23 +21,78 @@ analyze_vb6: |
   }}}}
 
 propose_architecture: |
-  Based on summary: {summary}
-  Propose .NET 9 MVC architecture JSON: files with paths, types, namespaces; customizations like auth.
+  You are an expert .NET 9 software architect. Based on the provided analysis summary of a legacy VB6 application, propose a detailed and complete target architecture for a modern ASP.NET Core MVC application.
+
+  **CRITICAL INSTRUCTIONS:**
+  Your output MUST be a single, valid JSON object that strictly adheres to the specified structure.
+  You must provide exhaustive details for each file type:
+
+  1. **For `model` files:** You MUST populate the `properties` array. Infer the property names and data types from the `schema` in the analysis summary. Map VB6/Access data types to C# types (e.g., TEXT -> string, LONG -> int, DATETIME -> DateTime).
+
+  2. **For `controller` files:** You MUST populate the `methods` array. For each VB6 form, create corresponding action methods. A login form needs a GET method to show the page and a POST method to handle the submission. The method names should be descriptive (e.g., `Login`, `ChangePassword`, `ShowProfile`). Infer parameters from the UI controls on the original forms.
+
+  3. **For `view` files:** You MUST populate the `uiComponents` array. Map the `controls` from the VB6 form analysis to modern HTML components. For each `VB.TextBox`, create an "input" component. For each `VB.CommandButton`, create a "button".
+
+  4. **For all files:** You MUST populate the `dependencies` array. For controllers, this should include the services or repositories they use. For services, it should include the DbContext.
+
+  **Analysis Summary to use:**
+  ```json
+  {summary}
   Output only valid JSON without any additional text, code blocks, or explanations. Start directly with '{{{{' and end with '}}}}'.
+
   Follow this exact structure:
   {{{{
-    "files": [
-      {{{{
-        "file_path": "Controllers/ExampleController.cs",
-        "type": "controller",
-        "namespace": "MyApp.Controllers",
-        "dependencies": ["Models/ExampleModel.cs"]
-      }}}}
-    ],
-    "customizations": {{{{
-      "authentication": true
-    }}}},
-    "ef_core_context": "Data/ApplicationDbContext.cs"
+  "projectName": "RailwayReservationSystem",
+  "files": [
+  {{{{
+  "filePath": "Models/UserModel.cs",
+  "type": "model",
+  "namespace": "RailwayReservationSystem.Models",
+  "dependencies": [],
+  "properties": [
+  {{{{"name": "Id", "dataType": "int", "attributes": ["Key"]}}}},
+  {{{{"name": "Username", "dataType": "string", "attributes": ["Required", "StringLength(50)"]}}}},
+  {{{{"name": "Email", "dataType": "string", "attributes": ["EmailAddress"]}}}}
+  ]
+  }}}},
+  {{{{
+  "filePath": "Controllers/AccountController.cs",
+  "type": "controller",
+  "namespace": "RailwayReservationSystem.Controllers",
+  "dependencies": ["Services/IAuthenticationService"],
+  "methods": [
+  {{{{
+  "name": "Login",
+  "returnType": "IActionResult",
+  "parameters": [],
+  "httpVerb": "GET",
+  "description": "Displays the login page."
+  }}}},
+  {{{{
+  "name": "Login",
+  "returnType": "IActionResult",
+  "parameters": [ {{{{"dataType": "LoginViewModel", "name": "model"}}}} ],
+  "httpVerb": "POST",
+  "description": "Handles the user login submission."
+  }}}}
+  ]
+  }}}},
+  {{{{
+  "filePath": "Views/Account/Login.cshtml",
+  "type": "view",
+  "namespace": "RailwayReservationSystem.Views.Account",
+  "dependencies": ["Models/LoginViewModel"],
+  "uiComponents": [
+  {{{{"componentType": "input", "label": "Username", "bindsTo": "Username"}}}},
+  {{{{"componentType": "input", "label": "Password", "bindsTo": "Password", "attributes": ["type=password"]}}}},
+  {{{{"componentType": "button", "label": "Login", "attributes": ["type=submit"]}}}}
+  ]
+  }}}}
+  ],
+  "customizations": {{{{
+  "authentication": true
+  }}}},
+  "efCoreContext": "Data/ApplicationDbContext.cs"
   }}}}
 
 infer_schema: |
@@ -131,3 +186,61 @@ refine_code: |
   {files}
 
   Now, provide the JSON object containing only the corrected file(s).
+
+
+generate_model: |
+  You are an expert C# developer. Generate the complete C# code for a model class based on the provided JSON definition.
+
+  Instructions:
+  - Derive the class name from the `filePath`.
+  - Use the `namespace` exactly as specified.
+  - Create a public property for each item in the `properties` array.
+  - Use the specified `dataType`.
+  - Apply all specified `attributes` as C# data annotations (e.g., [Key], [Required]).
+
+  Input JSON:
+  {context}
+
+  Output Requirements:
+  - Generate only raw C# code (no explanations, no markdown fences).
+  - Use `System.ComponentModel.DataAnnotations` where applicable.
+
+generate_controller: |
+  You are an expert ASP.NET Core developer. Generate the complete C# code for a controller class based on the provided JSON definition.
+
+  Instructions:
+  - Derive the class name from the `filePath`.
+  - Inherit the controller class from `Controller`.
+  - Use the exact `namespace` specified.
+  - Use constructor-based dependency injection for all items in the `dependencies` array.
+  - For each method in the `methods` array:
+    - Use the provided `name`, `returnType`, `parameters`, and `httpVerb`.
+    - Implement the method using the `description` and `rag_context`.
+
+  Input JSON:
+  {context}
+
+  Supporting RAG Context (Original VB6 Logic):
+  {rag_context}
+
+  Output Requirements:
+  - Write full C# code with no placeholder comments.
+  - Generate only the raw C# code (no markdown, no explanations).
+
+generate_view: |
+  You are an expert Razor and Bootstrap 5 developer. Generate the complete `.cshtml` file for an ASP.NET Core MVC view.
+
+  Instructions:
+  - Begin the file with `@model` using the class specified in the `dependencies`.
+  - Build a standard Bootstrap 5 HTML form.
+  - For each `uiComponent`:
+    - Use the `label` for `<label>`.
+    - Use the `bindsTo` for the `asp-for` attribute.
+    - Render appropriate HTML elements (e.g., `input`, `textarea`, `button`).
+    - Use proper Bootstrap form-group and control classes.
+
+  Input JSON:
+  {context}
+
+  Output Requirements:
+  - Generate only raw Razor (.cshtml) code (no explanations, no markdown).

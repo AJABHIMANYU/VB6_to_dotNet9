@@ -209,42 +209,104 @@ def refine_with_llm(files: dict, errors: list):
     except json.JSONDecodeError as e:
         raise ValueError(f"Failed to parse LLM response: {e} - Cleaned content: {cleaned_content} - Raw: {raw_content}")
 
+
+
+def generate_model_with_llm(context: dict) -> str:
+    """Generates C# code for a model class."""
+    prompt = prompts['generate_model'].format(context=json.dumps(context, indent=2))
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content
+
+def generate_controller_with_llm(context: dict, rag_context: str) -> str:
+    """Generates C# code for a controller class."""
+    prompt = prompts['generate_controller'].format(
+        context=json.dumps(context, indent=2),
+        rag_context=rag_context
+    )
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content
+
+def generate_view_with_llm(context: dict) -> str:
+    """Generates Razor .cshtml code for a view."""
+    prompt = prompts['generate_view'].format(context=json.dumps(context, indent=2))
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content
 # Pydantic models
+# --- CORRECTLY ORDERED PYDANTIC MODELS ---
+# Step 1: Define the "sub-models" FIRST.
+class ModelProperty(BaseModel):
+    name: str
+    data_type: str = Field(alias="dataType")
+    attributes: List[str] = Field(default=[])
+
+class MethodParameter(BaseModel):
+    data_type: str = Field(alias="dataType")
+    name: str
+
+class ControllerMethod(BaseModel):
+    name: str
+    return_type: str = Field(alias="returnType", default="IActionResult")
+    parameters: List[MethodParameter] = Field(default=[])
+    http_verb: str = Field(alias="httpVerb", default="GET")
+    description: str
+
+class UIComponent(BaseModel):
+    component_type: str = Field(alias="componentType")
+    label: str
+    binds_to: Optional[str] = Field(default=None, alias="bindsTo")
+    attributes: List[str] = Field(default=[])
+
+# Step 2: Now define the classes that USE the sub-models.
+class TargetFile(BaseModel):
+    # --- THIS IS THE CRITICAL FIX ---
+    # Add aliases to match the camelCase JSON from the LLM
+    file_path: str = Field(alias="filePath")
+    type: str
+    namespace: str
+    dependencies: List[str] = Field(default=[])
+    
+    properties: Optional[List[ModelProperty]] = Field(default=None)
+    methods: Optional[List[ControllerMethod]] = Field(default=None)
+    ui_components: Optional[List[UIComponent]] = Field(default=None, alias="uiComponents")
+    # --- END OF CRITICAL FIX ---
+
+    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
+
+class TargetArchitecture(BaseModel):
+    project_name: str = Field(alias="projectName", default="MigratedApp")
+    files: List[TargetFile]
+    customizations: Dict[str, Any] = Field(default={})
+    ef_core_context: Optional[str] = Field(default=None, alias="efCoreContext")
+
+    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
+
+# Original models (FileInfo, AnalysisSummary)
 class FileInfo(BaseModel):
     file_name: Optional[str] = Field(default=None, alias="file")
     purpose: str
     functionality: str
-    dependencies: List[str]
-    # CHANGE THIS LINE to allow for string or None values
+    dependencies: List[str] = Field(default=[])
     net_mapping: Optional[Dict[str, Optional[str]]] = Field(default={}, alias="netMappings")
     controls: List[str] = Field(default=[], description="UI controls")
     events: List[str] = Field(default=[], description="Events")
     ado_queries: List[str] = Field(default=[], description="ADO queries", alias="adoQueries")
-    
+
     model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
 
 class AnalysisSummary(BaseModel):
     files: List[FileInfo]
     overall_purpose: Optional[str] = Field(default="Generated summary", description="Overall project purpose")
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-class TargetFile(BaseModel):
-    file_path: str
-    type: str
-    namespace: str
-    # Make dependencies optional and default to an empty list if missing
-    dependencies: List[str] = Field(default=[])
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-class TargetArchitecture(BaseModel):
-    files: List[TargetFile]
-    customizations: Dict[str, bool]
-    ef_core_context: str
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
 
 class AnalysisInput(BaseModel):
-    vb6_project_path: str  # Can be a local path or GitHub URL
- 
+    vb6_project_path: str
+    vb6_project_path: str
