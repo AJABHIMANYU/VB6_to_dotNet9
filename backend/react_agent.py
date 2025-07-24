@@ -9,7 +9,9 @@ import json
 from ai_utils import (
     generate_model_with_llm, 
     generate_controller_with_llm, 
-    generate_view_with_llm
+    generate_view_with_llm,
+    generate_interface_with_llm,
+    generate_service_with_llm
 )
 from unified_rag import UnifiedRagService
 from fcache.cache import FileCache
@@ -27,19 +29,15 @@ STATIC_TEMPLATES = {
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.0" />
-    <!-- You may need other providers like EntityFrameworkCore.Jet for MS Access -->
   </ItemGroup>
 </Project>""",
-    'program': """var builder = WebApplication.CreateBuilder(args);
+    'Program.cs': """var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllersWithViews();
-// Add DbContext registration here if needed, e.g.:
-// builder.Services.AddDbContext<ApplicationDbContext>(options => 
-//   options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 var app = builder.Build();
 if (!app.Environment.IsDevelopment()) { app.UseExceptionHandler("/Home/Error"); app.UseHsts(); }
 app.UseHttpsRedirection();
@@ -47,13 +45,8 @@ app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthorization();
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
-app.Run();""",
-    '_ViewImports.cshtml': """@using {namespace}
-@using {namespace}.Models
-@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers""",
-    '_ViewStart.cshtml': """@{
-    Layout = "_Layout";
-}""",
+app.Run();
+""",
     '_Layout.cshtml': """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -82,6 +75,12 @@ app.Run();""",
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>""",
+    '_ViewStart.cshtml': """@{
+    Layout = "_Layout";
+}""",
+    '_ViewImports.cshtml': """@using {namespace}
+@using {namespace}.Models
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers""",
     'appsettings.json': """{
     "ConnectionStrings": {
         "DefaultConnection": "{connection_string}"
@@ -94,14 +93,14 @@ app.Run();""",
 
 def react_agent_generate_files(analysis: dict, architecture: dict, rag_service: UnifiedRagService, file_cache: FileCache):
     generated_files = {}
-    # --- FIX: Use the snake_case key that exists in the retrieved dictionary ---
+    # --- FIX: Use the snake_case key that is stored in the database ---
     project_name = architecture.get('project_name', 'MigratedApp')
 
     logging.info(f"--- Starting DETAILED ReAct Agent generation for project '{project_name}' ---")
 
     architecture_files = architecture.get('files', [])
     for i, target_file_def in enumerate(architecture_files):
-        # --- FIX: Use the snake_case keys that exist in the retrieved dictionary ---
+        # --- FIX: Use the snake_case keys that are stored in the database ---
         file_path = target_file_def.get('file_path')
         file_type = target_file_def.get('type')
 
@@ -113,7 +112,6 @@ def react_agent_generate_files(analysis: dict, architecture: dict, rag_service: 
 
         content_to_process = ""
         
-        # --- GENERATION LOGIC ---
         template_key = os.path.basename(file_path)
         if template_key in STATIC_TEMPLATES:
             logging.info(f"  Found static template for file name: '{template_key}'.")
@@ -130,17 +128,20 @@ def react_agent_generate_files(analysis: dict, architecture: dict, rag_service: 
             context_for_llm = target_file_def
             logging.info(f"  Calling specialized generator for file type: '{file_type}'...")
             
-            if file_type == 'model':
+            if file_type in ['model', 'viewmodel']:
                 content_to_process = generate_model_with_llm(context_for_llm)
             elif file_type == 'controller':
                 content_to_process = generate_controller_with_llm(context_for_llm, rag_context)
             elif file_type == 'view':
                 content_to_process = generate_view_with_llm(context_for_llm)
+            elif file_type == 'interface':
+                content_to_process = generate_interface_with_llm(context_for_llm)
+            elif file_type == 'service':
+                content_to_process = generate_service_with_llm(context_for_llm, rag_context)
             else:
                 logging.warning(f"  No specialized generator or static template for type '{file_type}'. Skipping file.")
                 continue
         
-        # --- ASSEMBLY LOGIC ---
         final_content = content_to_process.replace('{namespace}', project_name)
         if 'appsettings.json' in file_path:
             placeholder_conn_str = "Server=YOUR_SERVER;Database=YOUR_DB;User Id=YOUR_USER;Password=YOUR_PASSWORD;"
@@ -149,7 +150,6 @@ def react_agent_generate_files(analysis: dict, architecture: dict, rag_service: 
         generated_files[file_path] = final_content
         logging.info(f"  Successfully generated and assembled content for: {file_path}")
 
-    # --- RESOURCE CONVERSION LOGIC ---
     resources = analysis.get('resources', [])
     if resources:
         logging.info(f"--- Handling {len(resources)} resource files ---")

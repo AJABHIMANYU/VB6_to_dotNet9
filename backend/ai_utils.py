@@ -8,7 +8,7 @@ import json
 import re
 import logging
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -240,9 +240,36 @@ def generate_view_with_llm(context: dict) -> str:
         messages=[{"role": "user", "content": prompt}]
     )
     return response.choices[0].message.content
+
+def generate_interface_with_llm(context: dict) -> str:
+    """Generates C# code for an interface."""
+    prompt = prompts['generate_interface'].format(context=json.dumps(context, indent=2))
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content
+
+def generate_service_with_llm(context: dict, rag_context: str) -> str:
+    """Generates C# code for a service class."""
+    prompt = prompts['generate_service'].format(
+        context=json.dumps(context, indent=2),
+        rag_context=rag_context
+    )
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content
+
+
+
+
+
 # Pydantic models
 # --- CORRECTLY ORDERED PYDANTIC MODELS ---
 # Step 1: Define the "sub-models" FIRST.
+
 class ModelProperty(BaseModel):
     name: str
     data_type: str = Field(alias="dataType")
@@ -257,37 +284,33 @@ class ControllerMethod(BaseModel):
     return_type: str = Field(alias="returnType", default="IActionResult")
     parameters: List[MethodParameter] = Field(default=[])
     http_verb: str = Field(alias="httpVerb", default="GET")
-    description: str
+    description: Optional[str] = None
+
+
+# --- FIX for Error 2: Make UIComponent more flexible ---
+class UIComponentProperties(BaseModel):
+    """Handles the nested properties dictionary the AI is now sending."""
+    label: Optional[str] = None
+    name: Optional[str] = None
+    onclick: Optional[str] = None
+    type: Optional[str] = None # For things like <input type="password">
+    value: Optional[str] = None
 
 class UIComponent(BaseModel):
-    component_type: str = Field(alias="componentType")
-    label: str
-    binds_to: Optional[str] = Field(default=None, alias="bindsTo")
-    attributes: List[str] = Field(default=[])
-
-# Step 2: Now define the classes that USE the sub-models.
-class TargetFile(BaseModel):
-    # --- THIS IS THE CRITICAL FIX ---
-    # Add aliases to match the camelCase JSON from the LLM
-    file_path: str = Field(alias="filePath")
-    type: str
-    namespace: str
-    dependencies: List[str] = Field(default=[])
+    """
+    A highly flexible model that can handle multiple structures the AI might produce.
+    """
+    # Accept both 'componentType' from our prompt and 'type' which the AI seems to prefer.
+    component_type: Optional[str] = Field(default=None, alias="componentType")
+    type: Optional[str] = None 
     
-    properties: Optional[List[ModelProperty]] = Field(default=None)
-    methods: Optional[List[ControllerMethod]] = Field(default=None)
-    ui_components: Optional[List[UIComponent]] = Field(default=None, alias="uiComponents")
-    # --- END OF CRITICAL FIX ---
-
-    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
-
-class TargetArchitecture(BaseModel):
-    project_name: str = Field(alias="projectName", default="MigratedApp")
-    files: List[TargetFile]
-    customizations: Dict[str, Any] = Field(default={})
-    ef_core_context: Optional[str] = Field(default=None, alias="efCoreContext")
-
-    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
+    # Handle the nested properties structure.
+    properties: Optional[UIComponentProperties] = None
+    
+    # Keep the old top-level fields for backwards compatibility or if the AI uses them.
+    label: Optional[str] = None
+    binds_to: Optional[str] = Field(default=None, alias="bindsTo")
+    attributes: List[Any] = Field(default=[]) # Make attributes very flexible
 
 # Original models (FileInfo, AnalysisSummary)
 class FileInfo(BaseModel):
@@ -307,6 +330,34 @@ class AnalysisSummary(BaseModel):
     overall_purpose: Optional[str] = Field(default="Generated summary", description="Overall project purpose")
     model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
 
+
+
 class AnalysisInput(BaseModel):
     vb6_project_path: str
     vb6_project_path: str
+
+class TargetFile(BaseModel):
+    file_path: str = Field(alias="filePath")
+    type: str
+    namespace: Optional[str] = None
+    dependencies: List[str] = Field(default=[])
+    
+    properties: Optional[List[ModelProperty]] = Field(default=None)
+    methods: Optional[List[ControllerMethod]] = Field(default=None)
+    ui_components: Optional[List[UIComponent]] = Field(default=None, alias="uiComponents")
+
+    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
+
+class TargetArchitecture(BaseModel):
+    project_name: str = Field(alias="projectName", default="MigratedApp")
+    files: List[TargetFile]
+    customizations: Dict[str, Any] = Field(default={})
+    ef_core_context: Optional[str] = Field(default=None, alias="efCoreContext")
+
+    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
+    project_name: str = Field(alias="projectName", default="MigratedApp")
+    files: List[TargetFile]
+    customizations: Dict[str, Any] = Field(default={})
+    ef_core_context: Optional[str] = Field(default=None, alias="efCoreContext")
+
+    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)

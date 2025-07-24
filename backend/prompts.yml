@@ -20,80 +20,6 @@ analyze_vb6: |
     ]
   }}}}
 
-propose_architecture: |
-  You are an expert .NET 9 software architect. Based on the provided analysis summary of a legacy VB6 application, propose a detailed and complete target architecture for a modern ASP.NET Core MVC application.
-
-  **CRITICAL INSTRUCTIONS:**
-  Your output MUST be a single, valid JSON object that strictly adheres to the specified structure.
-  You must provide exhaustive details for each file type:
-
-  1. **For `model` files:** You MUST populate the `properties` array. Infer the property names and data types from the `schema` in the analysis summary. Map VB6/Access data types to C# types (e.g., TEXT -> string, LONG -> int, DATETIME -> DateTime).
-
-  2. **For `controller` files:** You MUST populate the `methods` array. For each VB6 form, create corresponding action methods. A login form needs a GET method to show the page and a POST method to handle the submission. The method names should be descriptive (e.g., `Login`, `ChangePassword`, `ShowProfile`). Infer parameters from the UI controls on the original forms.
-
-  3. **For `view` files:** You MUST populate the `uiComponents` array. Map the `controls` from the VB6 form analysis to modern HTML components. For each `VB.TextBox`, create an "input" component. For each `VB.CommandButton`, create a "button".
-
-  4. **For all files:** You MUST populate the `dependencies` array. For controllers, this should include the services or repositories they use. For services, it should include the DbContext.
-
-  **Analysis Summary to use:**
-  ```json
-  {summary}
-  Output only valid JSON without any additional text, code blocks, or explanations. Start directly with '{{{{' and end with '}}}}'.
-
-  Follow this exact structure:
-  {{{{
-  "projectName": "RailwayReservationSystem",
-  "files": [
-  {{{{
-  "filePath": "Models/UserModel.cs",
-  "type": "model",
-  "namespace": "RailwayReservationSystem.Models",
-  "dependencies": [],
-  "properties": [
-  {{{{"name": "Id", "dataType": "int", "attributes": ["Key"]}}}},
-  {{{{"name": "Username", "dataType": "string", "attributes": ["Required", "StringLength(50)"]}}}},
-  {{{{"name": "Email", "dataType": "string", "attributes": ["EmailAddress"]}}}}
-  ]
-  }}}},
-  {{{{
-  "filePath": "Controllers/AccountController.cs",
-  "type": "controller",
-  "namespace": "RailwayReservationSystem.Controllers",
-  "dependencies": ["Services/IAuthenticationService"],
-  "methods": [
-  {{{{
-  "name": "Login",
-  "returnType": "IActionResult",
-  "parameters": [],
-  "httpVerb": "GET",
-  "description": "Displays the login page."
-  }}}},
-  {{{{
-  "name": "Login",
-  "returnType": "IActionResult",
-  "parameters": [ {{{{"dataType": "LoginViewModel", "name": "model"}}}} ],
-  "httpVerb": "POST",
-  "description": "Handles the user login submission."
-  }}}}
-  ]
-  }}}},
-  {{{{
-  "filePath": "Views/Account/Login.cshtml",
-  "type": "view",
-  "namespace": "RailwayReservationSystem.Views.Account",
-  "dependencies": ["Models/LoginViewModel"],
-  "uiComponents": [
-  {{{{"componentType": "input", "label": "Username", "bindsTo": "Username"}}}},
-  {{{{"componentType": "input", "label": "Password", "bindsTo": "Password", "attributes": ["type=password"]}}}},
-  {{{{"componentType": "button", "label": "Login", "attributes": ["type=submit"]}}}}
-  ]
-  }}}}
-  ],
-  "customizations": {{{{
-  "authentication": true
-  }}}},
-  "efCoreContext": "Data/ApplicationDbContext.cs"
-  }}}}
 
 infer_schema: |
   Infer MySQL schema from ADO queries: {ado_queries}
@@ -244,3 +170,106 @@ generate_view: |
 
   Output Requirements:
   - Generate only raw Razor (.cshtml) code (no explanations, no markdown).
+
+
+
+propose_architecture: |
+  You are an expert .NET 9 software architect. Your task is to create a DETAILED and COMPLETE project plan for a modern ASP.NET Core MVC application, based on the provided analysis of a legacy VB6 application.
+
+  CRITICAL INSTRUCTIONS:
+  - Comprehensive Coverage: You MUST create a plan that covers ALL major user-facing functionalities identified in the Analysis Summary. This includes, but is not limited to, User Authentication (Login, Signup, Change Password), User Profile Management, and Train Search/Booking/Reservation. Do not omit any features.
+  - Full Project Structure: Your plan MUST include ALL necessary files for a working application: boilerplate (.csproj, Program.cs, _Layout.cshtml, etc.), Models, ViewModels, Interfaces, Services, Controllers, and Views.
+  - Strict JSON Output: Your output MUST be a single, valid JSON object that strictly adheres to the structure in the example.
+
+  DETAILED REQUIREMENTS for each file type:
+  - Models & ViewModels: Populate the `properties` array based on the database schema and form controls from the analysis.
+  - Interfaces & Services: Define methods for every piece of business logic. A login form requires an `Authenticate` method; a signup form requires a `RegisterUser` method.
+  - Controllers: The `methods` array must contain an action method for every user interaction (e.g., a GET and POST for a login form). `dependencies` must list the required services.
+  - Views: The `uiComponents` array must be a list of objects, mapping all controls from the original form.
+
+  Analysis Summary to use:
+  ```json
+  {summary}
+  ```
+
+  Output only valid JSON without any additional text, code blocks, or explanations. Start directly with '{{{{' and end with '}}}}'.
+  Follow this exact structure:
+  {{{{
+    "projectName": "RailwayReservationSystem",
+    "files": [
+      {{{{ "filePath": "RailwayReservationSystem.csproj", "type": "csproj" }}}},
+      {{{{ "filePath": "Program.cs", "type": "program" }}}},
+      {{{{ "filePath": "Views/Shared/_Layout.cshtml", "type": "_Layout.cshtml" }}}},
+
+      // --- Example for a ViewModel ---
+      {{{{
+        "filePath": "Models/ViewModels/SignupViewModel.cs", "type": "viewmodel",
+        "properties": [
+          {{{{"name": "Username", "dataType": "string"}}}},
+          {{{{"name": "Password", "dataType": "string"}}}},
+          {{{{"name": "Email", "dataType": "string"}}}}
+        ]
+      }}}},
+
+      // --- Example for an Interface ---
+      {{{{
+        "filePath": "Services/ITrainService.cs", "type": "interface",
+        "methods": [
+          {{{{
+            "name": "SearchTrains",
+            "returnType": "List<TrainDetail>",
+            "parameters": [{{{{"dataType": "string", "name": "source"}}}}]
+          }}}}
+        ]
+      }}}},
+
+      // --- Example for a Service ---
+      {{{{
+        "filePath": "Services/TrainService.cs", "type": "service",
+        "dependencies": ["Data/ApplicationDbContext", "ITrainService"],
+        "methods": [
+          {{{{
+            "name": "SearchTrains",
+            "returnType": "List<TrainDetail>",
+            "parameters": [{{{{"dataType": "string", "name": "source"}}}}]
+          }}}}
+        ]
+      }}}},
+
+      // --- Example for a Controller ---
+      {{{{
+        "filePath": "Controllers/TrainController.cs", "type": "controller",
+        "dependencies": ["Services/ITrainService"],
+        "methods": [
+          {{{{
+            "name": "Search",
+            "returnType": "IActionResult",
+            "parameters": [{{{{"dataType": "SearchViewModel", "name": "model"}}}}],
+            "httpVerb": "POST"
+          }}}}
+        ]
+      }}}}
+    ],
+    "customizations": {{{{"authentication": true}}}},
+    "efCoreContext": "Data/ApplicationDbContext.cs"
+  }}}}
+
+
+generate_interface: |
+  You are an expert C# developer. Generate a C# interface based on the provided JSON definition.
+  - Derive the interface name from the `filePath` (e.g., `TrainService.cs` becomes `ITrainService`).
+  - Use the exact namespace specified in the JSON.
+  - Create method signatures for each item in the `methods` array, without method bodies.
+  - Output only the raw C# code, including namespace and interface declaration.
+  File Definition: {context}
+
+generate_service: |
+  You are an expert C# developer. Generate a C# service class that implements the specified interface.
+  - Derive the class name from the `filePath` (e.g., `TrainService.cs` becomes `TrainService`).
+  - Use the exact namespace specified in the JSON.
+  - Implement the interface listed in the `dependencies` array.
+  - Use constructor-based dependency injection for dependencies like the DbContext.
+  - For each method in the `methods` array, provide a full implementation using the `description` and `rag_context` for business logic.
+  - Output only the raw C# code, including namespace, class, and interface implementation.
+  File Definition: {context}
+  Supporting RAG Context (Original VB6 Logic): {rag_context}
