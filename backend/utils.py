@@ -7,7 +7,6 @@ import logging
 from pathlib import Path
 import tempfile
 import mysql.connector
-from ai_utils import infer_schema_with_llm  # Updated import from combined file
 from urllib.parse import urlparse
 import contextlib
 import shutil  # For secure cleanup
@@ -50,78 +49,49 @@ def build_dependency_graph(parsed_data: list) -> dict:
     return graph
 
 # From schema_parser.py
-def analyze_schema(ado_queries: list = None, classes: list = None):
-    """
-    Infers a database schema by analyzing ADO queries found in the source code,
-    using an LLM as the primary analysis tool.
-    
-    Args:
-        ado_queries: A list of SQL query strings extracted from the VB6 code.
-        classes: A list of parsed class data (reserved for future enhancements).
-
-    Returns:
-        A dictionary representing the inferred database schema.
-    """
-    try:
-        # Although 'classes' is passed, we primarily rely on the globally parsed ado_queries
-        # as the most direct source of schema information.
-        all_queries = ado_queries or []
-
-        if not all_queries:
-            logging.warning("No ADO queries found to infer a schema from. The generated data models may be incomplete.")
-            return {"database": "inferred_db", "tables": []}
-
-        # Use the LLM to infer the schema from the collected queries.
-        logging.info(f"Inferring schema from {len(all_queries)} ADO queries using LLM...")
-        schema = infer_schema_with_llm(all_queries)
-        
-        # Ensure the output has a database name for consistency in later steps.
-        if "database" not in schema:
-            schema["database"] = "inferred_db"
-
-        logging.info("Successfully inferred schema using LLM.")
-        return schema
-
-    except Exception as e:
-        logging.error(f"An error occurred while inferring schema with LLM: {e}")
-        # Return a safe, empty default value to allow the process to continue if possible.
-        return {"database": "unknown", "tables": []}
 
 # From parsers.py (all functions combined here)
-def parse_vb6_project(vb6_project_path: str) -> Tuple[List[Dict], List[str], List[Dict], Dict]:
+def parse_vb6_project(vb6_project_path: str = None, uploaded_file = None) -> Tuple[List[Dict], List[str], List[Dict], Dict]:
     """
-    Parse a VB6 project by finding all relevant files within the project
-    directory after cloning/copying it to a temporary location. This version
-    handles a comprehensive set of VB6 file types.
+    Parse a VB6 project from a Git repo, a local path, or an uploaded zip file.
+    Also detects Win32 API declarations.
     """
     temp_dir = None
     try:
         temp_dir = tempfile.mkdtemp()
         logging.info(f"Created temporary directory for processing: {temp_dir}")
-        project_root_in_temp = ""
+        project_root_in_temp = temp_dir
 
-        if vb6_project_path.startswith(("http://", "https://")):
-            logging.info(f"Cloning GitHub repository from {vb6_project_path} into {temp_dir}")
-            git.Repo.clone_from(vb6_project_path, temp_dir)
-            project_root_in_temp = temp_dir
+        if uploaded_file:
+            logging.info(f"Processing uploaded file: {uploaded_file.filename}")
+            zip_path = os.path.join(temp_dir, uploaded_file.filename)
+            with open(zip_path, "wb") as buffer:
+                shutil.copyfileobj(uploaded_file.file, buffer)
+            
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(project_root_in_temp)
+            logging.info(f"Extracted zip file to {project_root_in_temp}")
+
+        elif vb6_project_path:
+            if vb6_project_path.startswith(("http://", "https://")):
+                logging.info(f"Cloning GitHub repository from {vb6_project_path} into {temp_dir}")
+                git.Repo.clone_from(vb6_project_path, project_root_in_temp)
+            else:
+                logging.info(f"Processing local VB6 project from: {vb6_project_path}")
+                if not os.path.exists(vb6_project_path):
+                    raise ValueError(f"VB6 project path does not exist: {vb6_project_path}")
+                # For local paths, we assume it's a directory and copy its contents
+                shutil.copytree(vb6_project_path, project_root_in_temp, dirs_exist_ok=True)
         else:
-            logging.info(f"Processing local VB6 project from: {vb6_project_path}")
-            if not os.path.exists(vb6_project_path):
-                raise ValueError(f"VB6 project path does not exist: {vb6_project_path}")
-            original_project_root = os.path.dirname(vb6_project_path)
-            shutil.copytree(original_project_root, temp_dir, dirs_exist_ok=True)
-            project_root_in_temp = temp_dir
-        
-        # Define patterns for all relevant VB6 file types
-        text_based_patterns = ["*.vbp", "*.frm", "*.bas", "*.cls", "*.ctl", "*.pag", "*.dsr", "*.vbw"]
-        binary_based_patterns = ["*.frx", "*.ctx", "*.dsx", "*.res"]
-        
+            raise ValueError("Either a project path/URL or an uploaded file must be provided.")
+
+        text_based_patterns = ["*.vbp", "*.frm", "*.bas", "*.cls"]
         all_found_files = []
-        for pattern in text_based_patterns + binary_based_patterns:
+        for pattern in text_based_patterns:
             all_found_files.extend(Path(project_root_in_temp).rglob(pattern))
 
         if not all_found_files:
-            raise ValueError(f"No VB6 project files found in the provided path/repository.")
+            raise ValueError(f"No VB6 project files found in the provided source.")
 
         parsed_data = []
         ado_queries = []
@@ -130,42 +100,30 @@ def parse_vb6_project(vb6_project_path: str) -> Tuple[List[Dict], List[str], Lis
         for file_path_obj in all_found_files:
             file_path = str(file_path_obj)
             file_name = os.path.basename(file_path)
-            file_extension = os.path.splitext(file_name)[1].lower()
-            file_type = file_extension.replace('.', '')
-
-            file_info = {
-                "file": file_name,
-                "type": file_type,
-                "controls": [],
-                "ado_queries": [],
-                "content": ""
-            }
             
-            # --- THIS IS THE CORRECTED LOGIC ---
-            if any(file_name.lower().endswith(ext.replace('*', '')) for ext in text_based_patterns):
-                logging.info(f"Parsing text-based .{file_type} file: {file_path}")
-                try:
-                    with open(file_path, 'r', encoding='latin-1', errors='ignore') as code_file:
-                        content = code_file.read()
-                    
-                    file_info["content"] = content
-                    
-                    if file_type in ['frm', 'ctl', 'pag', 'dsr']:
-                        file_info["controls"] = re.findall(r'Begin\s+VB\.(\w+)', content)
-                    
-                    queries = re.findall(r'SELECT\s+.*?\s+FROM\s+\w+', content, re.IGNORECASE)
-                    file_info["ado_queries"] = queries
-                    ado_queries.extend(queries)
-
-                    if file_type == 'cls':
-                        all_class_names.append(os.path.splitext(file_name)[0])
-                except Exception as e:
-                    logging.warning(f"Could not read or parse text file {file_name}: {e}")
+            file_info = { "file": file_name, "content": "", "win32_declarations": [] }
             
-            elif any(file_name.lower().endswith(ext.replace('*', '')) for ext in binary_based_patterns):
-                logging.info(f"Identifying binary resource .{file_type} file: {file_path}")
-                file_info["content"] = f"[Binary resource file: {file_name}. Content not readable.]"
-            # --- END OF CORRECTED LOGIC ---
+            try:
+                with open(file_path, 'r', encoding='latin-1', errors='ignore') as code_file:
+                    content = code_file.read()
+                
+                file_info["content"] = content
+                
+                # --- NEW: Detect P/Invoke (Win32 API) calls ---
+                declarations = re.findall(r'Declare\s+(Function|Sub)\s+.*', content, re.IGNORECASE)
+                if declarations:
+                    logging.warning(f"Found {len(declarations)} Win32 API declarations in {file_name}. Manual verification will be required.")
+                    file_info["win32_declarations"] = declarations
+
+                # Existing parsing logic
+                queries = re.findall(r'SELECT\s+.*?\s+FROM\s+\w+', content, re.IGNORECASE)
+                file_info["ado_queries"] = queries
+                ado_queries.extend(queries)
+                
+                if file_path.lower().endswith('.cls'):
+                    all_class_names.append(os.path.splitext(file_name)[0])
+            except Exception as e:
+                logging.warning(f"Could not read or parse file {file_name}: {e}")
             
             parsed_data.append(file_info)
 
@@ -178,6 +136,8 @@ def parse_vb6_project(vb6_project_path: str) -> Tuple[List[Dict], List[str], Lis
     finally:
         if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 
 def fallback_simple_parser(project_path):
     """Fallback: Simple content extraction if regex fails (from existing code)."""

@@ -12,3 +12,4 @@ sentence-transformers
 python-dotenv
 certifi
 fcache
+python-multipart

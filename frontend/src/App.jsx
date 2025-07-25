@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { Container, Row, Col, Alert, Spinner, Button } from 'react-bootstrap';
+import { Container, Row, Col, Alert, Spinner, Button, Form } from 'react-bootstrap';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './App.css';
 
@@ -11,29 +11,44 @@ function App() {
   const [error, setError] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
-  
-  // --- THIS LINE WAS MISSING ---
   const [downloadUrl, setDownloadUrl] = useState('');
-  // --- END OF FIX ---
+  
+  // New state for file upload
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [projectPath, setProjectPath] = useState('');
 
-  const apiBaseUrl = 'http://localhost:8000'; // Your backend URL
+
+  const apiBaseUrl = 'http://localhost:8000';
 
   const handleAnalyze = async (e) => {
     e.preventDefault();
     setError('');
     setAnalysisResult(null);
     setMigrationResult(null);
-    setDownloadUrl(''); // Also reset download URL when starting a new analysis
+    setDownloadUrl('');
     setIsAnalyzing(true);
-    
-    const projectPath = e.target.projectPath.value;
+
+    // Use FormData to send file and/or text fields
+    const formData = new FormData();
+
+    if (selectedFile) {
+      formData.append('uploaded_file', selectedFile);
+    } else if (projectPath) {
+      formData.append('vb6_project_path', projectPath);
+    } else {
+      setError('Please provide a Git Repo URL or upload a project zip file.');
+      setIsAnalyzing(false);
+      return;
+    }
 
     try {
-      const payload = {
-        vb6_project_path: projectPath
-      };
-      const response = await axios.post(`${apiBaseUrl}/analyze`, payload);
-      setAnalysisResult(response.data);
+      const response = await axios.post(`${apiBaseUrl}/analyze`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      setAnalysisResult(response.data); // The whole response is the result now
       if (response.data.analysis_id) {
         setAnalysisId(response.data.analysis_id);
       }
@@ -49,13 +64,15 @@ function App() {
     e.preventDefault();
     setError('');
     setMigrationResult(null);
-    setDownloadUrl(''); // Reset download URL on new migration attempt
+    setDownloadUrl('');
     setIsMigrating(true);
     
-    const id = e.target.analysisId.value;
+    // We get the modified architecture from the textarea
     const modifiedArchText = e.target.modifiedArch.value.trim();
     let modifiedArchPayload = null;
-
+    
+    // If the textarea is not empty, use its content.
+    // Otherwise, use the architecture from the analysis result.
     if (modifiedArchText) {
       try {
         modifiedArchPayload = JSON.parse(modifiedArchText);
@@ -64,22 +81,26 @@ function App() {
         setIsMigrating(false);
         return;
       }
+    } else if (analysisResult && analysisResult.proposed_architecture) {
+      modifiedArchPayload = analysisResult.proposed_architecture;
+    } else {
+       setError('Migration failed: No architecture to migrate. Please run analysis first.');
+       setIsMigrating(false);
+       return;
     }
 
     try {
       const payload = {
-        analysis_id: id,
+        analysis_id: analysisId,
         modified_architecture: modifiedArchPayload,
       };
 
       const response = await axios.post(`${apiBaseUrl}/migrate`, payload);
       setMigrationResult(response.data);
 
-      // This part now works correctly because setDownloadUrl is defined
       if (response.data.zip_path) {
         const url = `${apiBaseUrl}/static/${response.data.zip_path}`;
         setDownloadUrl(url);
-        console.log("Download URL created:", url);
       }
 
     } catch (err) {
@@ -90,9 +111,19 @@ function App() {
     }
   };
 
+  const handleFileChange = (e) => {
+    setSelectedFile(e.target.files[0]);
+    setProjectPath(''); // Clear path input when file is selected
+  };
+
+  const handlePathChange = (e) => {
+    setProjectPath(e.target.value);
+    setSelectedFile(null); // Clear file input when path is typed
+  };
+
   return (
     <Container className="mt-5">
-      <h1 className="text-center mb-4">VB6 to .NET Migration Tool</h1>
+      <h1 className="text-center mb-4">VB6 to .NET Windows Service Migration</h1>
       {error && <Alert variant="danger">{error}</Alert>}
 
       <Row className="mt-4">
@@ -100,33 +131,39 @@ function App() {
         <Col md={6} className="card-column">
           <div className="card p-4">
             <h2 className="card-title">1. Analyze VB6 Project</h2>
-            <form onSubmit={handleAnalyze}>
-              <div className="mb-3">
-                <label htmlFor="projectPath" className="form-label">Git Repo URL or Local File Path:</label>
-                <input 
+            <Form onSubmit={handleAnalyze}>
+              <Form.Group className="mb-3">
+                <Form.Label>Git Repo URL or Local Path:</Form.Label>
+                <Form.Control 
                   type="text" 
-                  name="projectPath" 
-                  id="projectPath"
-                  className="form-control" 
+                  value={projectPath}
+                  onChange={handlePathChange}
                   placeholder="e.g., https://github.com/user/repo.git"
-                  required 
+                  disabled={!!selectedFile}
                 />
-              </div>
-              <Button type="submit" variant="primary" disabled={isAnalyzing}>
-                {isAnalyzing ? (
-                  <>
-                    <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
-                    {' '}Analyzing...
-                  </>
-                ) : (
-                  'Analyze'
-                )}
+              </Form.Group>
+              
+              <p className="text-center my-2">OR</p>
+
+              <Form.Group className="mb-3">
+                <Form.Label>Upload Project (.zip):</Form.Label>
+                <Form.Control 
+                  type="file"
+                  accept=".zip"
+                  onChange={handleFileChange}
+                  disabled={!!projectPath}
+                />
+              </Form.Group>
+
+              <Button type="submit" variant="primary" disabled={isAnalyzing || (!projectPath && !selectedFile)}>
+                {isAnalyzing ? <><Spinner size="sm" /> Analyzing...</> : 'Analyze'}
               </Button>
-            </form>
+            </Form>
             {analysisResult && (
               <div className="mt-4 result-box">
-                <h4>Analysis Result</h4>
-                <pre>{JSON.stringify(analysisResult, null, 2)}</pre>
+                <h4>Analysis Complete</h4>
+                <p><strong>Analysis ID:</strong> {analysisResult.analysis_id}</p>
+                <p>Architecture proposed. You can review/edit it in the migration panel before migrating.</p>
               </div>
             )}
           </div>
@@ -136,47 +173,29 @@ function App() {
         <Col md={6} className="card-column">
           <div className="card p-4">
             <h2 className="card-title">2. Migrate Project</h2>
-            <form onSubmit={handleMigrate}>
-              <div className="mb-3">
-                <label htmlFor="analysisId" className="form-label">Analysis ID:</label>
-                <input 
-                  type="text" 
-                  name="analysisId"
-                  id="analysisId"
-                  value={analysisId}
-                  onChange={(e) => setAnalysisId(e.target.value)}
-                  className="form-control" 
-                  required 
-                  readOnly
+            <Form onSubmit={handleMigrate}>
+              <Form.Group className="mb-3">
+                <Form.Label>Analysis ID:</Form.Label>
+                <Form.Control type="text" value={analysisId} readOnly />
+              </Form.Group>
+              <Form.Group className="mb-3">
+                <Form.Label>Proposed/Modified Architecture JSON:</Form.Label>
+                <Form.Control 
+                  as="textarea"
+                  name="modifiedArch"
+                  rows="10"
+                  placeholder="The proposed architecture will appear here after analysis. You can edit it before migrating."
+                  defaultValue={analysisResult ? JSON.stringify(analysisResult.proposed_architecture, null, 2) : ''}
                 />
-              </div>
-              <div className="mb-3">
-                <label htmlFor="modifiedArch" className="form-label">Modified Architecture JSON (Optional):</label>
-                <textarea 
-                  name="modifiedArch" 
-                  id="modifiedArch"
-                  className="form-control" 
-                  rows="5"
-                  placeholder="Leave empty to use the proposed architecture."
-                ></textarea>
-              </div>
+              </Form.Group>
               <Button type="submit" variant="success" disabled={!analysisId || isMigrating}>
-                {isMigrating ? (
-                  <>
-                    <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" />
-                    {' '}Migrating...
-                  </>
-                ) : (
-                  'Migrate'
-                )}
+                {isMigrating ? <><Spinner size="sm" /> Migrating...</> : 'Migrate'}
               </Button>
-            </form>
+            </Form>
             {migrationResult && (
               <div className="mt-4 result-box">
                 <h4>Migration Result</h4>
-                <Alert variant="success">
-                  <strong>Status:</strong> {migrationResult.status}
-                </Alert>
+                <Alert variant="success"><strong>Status:</strong> {migrationResult.status}</Alert>
                 {downloadUrl && (
                   <div>
                     <a href={downloadUrl} className="btn btn-lg btn-success" download>

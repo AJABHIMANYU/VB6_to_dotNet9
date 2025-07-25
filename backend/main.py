@@ -5,20 +5,46 @@ import os
 from typing import Dict, Optional
 import uuid
 import tempfile
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from openai import AzureOpenAI
 from pydantic import BaseModel
 import git
 import uvicorn
-from utils import validate_git_url, secure_temp_dir, parse_vb6_project, analyze_schema, build_dependency_graph, validate_code, package_as_zip
-from ai_utils import AnalysisInput, analyze_single_vb6_file_with_llm, infer_schema_with_llm, propose_architecture_with_llm, AnalysisSummary, TargetArchitecture
+from utils import validate_git_url, secure_temp_dir, parse_vb6_project, build_dependency_graph, validate_code, package_as_zip
+from ai_utils import AnalysisInput, analyze_single_vb6_file_with_llm,  propose_architecture_with_llm, AnalysisSummary, TargetArchitecture, summarize_vb6_code_with_llm
 from database import retrieve_analysis, store_analysis
 from unified_rag import index_in_rag
 from react_agent import react_agent_generate_files
 from ai_utils import refine_with_llm
 from unified_rag import UnifiedRagService
 from database import retrieve_analysis, store_analysis
+import logging.handlers
+import sys
+
+# --- ADD THIS ENTIRE BLOCK FOR BETTER LOGGING ---
+# Create a logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Create handlers
+# A handler to write to the console (your terminal)
+c_handler = logging.StreamHandler(sys.stdout)
+# A handler to write to a file
+f_handler = logging.FileHandler('logs/migration_activity.log')
+c_handler.setLevel(logging.INFO)
+f_handler.setLevel(logging.INFO)
+
+# Create formatters and add it to handlers
+log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+c_handler.setFormatter(log_format)
+f_handler.setFormatter(log_format)
+
+# Add handlers to the logger
+logger.addHandler(c_handler)
+logger.addHandler(f_handler)
+
+
 app = FastAPI()
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,53 +65,102 @@ class AnalyzeInput(BaseModel):
     mysql_conn_details: dict = None  # e.g., {"host": "...", "user": "...", etc.}
 
 @app.post("/analyze")
-async def analyze(input: AnalysisInput):
-    try:
-        logging.info(f"Received payload: {input.model_dump()}")
+async def analyze(
+    vb6_project_path: Optional[str] = Form(None), 
+    uploaded_file: Optional[UploadFile] = File(None)
+):
+    if not vb6_project_path and not uploaded_file:
+        raise HTTPException(status_code=400, detail="Either 'vb6_project_path' or an uploaded file must be provided.")
+    if vb6_project_path and uploaded_file:
+        raise HTTPException(status_code=400, detail="Provide either 'vb6_project_path' or an uploaded file, not both.")
         
-        parsed_data, ado_queries, classes, dep_graph = parse_vb6_project(input.vb6_project_path)
-        logging.info(f"Completed parsing VB6 project with {len(parsed_data)} files.")
+    try:
+        logger.info(f"Received analysis request. Path: {vb6_project_path}, File: {uploaded_file.filename if uploaded_file else 'None'}")
+        # Pass arguments to the updated parser
+        parsed_data, ado_queries, classes, dep_graph = parse_vb6_project(
+            vb6_project_path=vb6_project_path, 
+            uploaded_file=uploaded_file
+        )
+        logger.info(f"Completed parsing VB6 project with {len(parsed_data)} files.")
+        # The rest of the function remains the same as before...
+        schema = {} # analyze_schema(ado_queries=ado_queries, classes=classes) # Temporarily disable for speed if needed
 
-        schema = analyze_schema(ado_queries=ado_queries, classes=classes)
-
-        logging.info("Starting individual file analysis with LLM...")
+        logger.info("Starting individual file analysis with LLM...")
         analyzed_files_data = []
+        # Define a character limit. 15000 chars is ~4000-5000 tokens, a safe limit.
+        CHARACTER_LIMIT_FOR_FULL_ANALYSIS = 15000
+
         for file_item in parsed_data:
-            logging.info(f"Analyzing file: {file_item.get('file')}...")
+            file_name = file_item.get('file')
+            content = file_item.get('content', '')
+            
+            analysis_input_data = {
+                'file': file_name,
+                'win32_declarations': file_item.get('win32_declarations', [])
+            }
+
+            # --- THIS IS THE CRITICAL LOGIC ---
+            if len(content) > CHARACTER_LIMIT_FOR_FULL_ANALYSIS:
+                logger.warning(f"File '{file_name}' is too long ({len(content)} chars). Summarizing before analysis.")                # Summarize the code because it's too long
+                summary_of_content = summarize_vb6_code_with_llm(content)
+                # Use the shorter summary INSTEAD of the full content
+                analysis_input_data['content'] = f"[[CONTENT WAS SUMMARIZED DUE TO LENGTH]]\n\n{summary_of_content}"
+            else:
+                # The content is short enough, pass it directly
+                analysis_input_data['content'] = content
+                
+            # --- END OF CRITICAL LOGIC ---
+            logger.info(f"Analyzing file: {file_name}...")
+            
             try:
-                analysis_result = analyze_single_vb6_file_with_llm(file_data=file_item, schema=schema)
+                analysis_result = analyze_single_vb6_file_with_llm(file_data=analysis_input_data, schema=schema)
                 analyzed_files_data.append(analysis_result)
             except Exception as e:
-                logging.error(f"Could not analyze file {file_item.get('file')}. Error: {e}. Skipping this file.")
+                logger.error(f"Could not analyze file {file_name}. Error: {e}. Skipping this file.")                
                 continue
 
-        summary_data = {"files": analyzed_files_data, "overall_purpose": "Generated from file-by-file analysis"}
-        validated_summary = AnalysisSummary(**summary_data)
-        logging.info("="*20 + " ANALYSIS SUMMARY " + "="*20)
-        logging.info(json.dumps(validated_summary.model_dump(), indent=2))
-        logging.info("="*60)
+        full_summary_data = {"files": analyzed_files_data, "overall_purpose": "Generated from file-by-file analysis"}
+        validated_summary = AnalysisSummary(**full_summary_data)
+        
+        # --- CRITICAL FIX: Create a "lean" summary for the architect LLM ---
+        logger.info("Creating a lean summary for architecture proposal to avoid token limits...")        
+        lean_summary_files = []
+        for file_analysis in validated_summary.model_dump().get('files', []):
+            lean_file_info = {
+                "file": file_analysis.get("file_name"),
+                "purpose": file_analysis.get("purpose"),
+                # We only include controls that are timers, as they are key for Windows Services
+                "timers_found": [ctrl for ctrl in file_analysis.get("controls", []) if "timer" in ctrl.lower()],
+                "ado_queries_count": len(file_analysis.get("ado_queries", [])),
+                # This is important for identifying dependencies
+                "dependencies": file_analysis.get("dependencies", [])
+            }
+            lean_summary_files.append(lean_file_info)
 
-        validated_architecture = TargetArchitecture(**propose_architecture_with_llm(validated_summary.model_dump()))
-        logging.info("="*20 + " PROPOSED ARCHITECTURE " + "="*20)
-        logging.info(json.dumps(validated_architecture.model_dump(), indent=2))
-        logging.info("="*63)
-        # --- THIS IS THE CRITICAL SECTION ---
+        lean_summary = {
+            "overall_purpose": validated_summary.overall_purpose,
+            "files": lean_summary_files
+        }
+        logger.info(f"Lean summary created. Sending to architect LLM:\n{json.dumps(lean_summary, indent=2)}")
+        # --- END OF CRITICAL FIX ---
+
+        # Now, call the architect with the SMALLER lean_summary
+        validated_architecture = TargetArchitecture(**propose_architecture_with_llm(lean_summary))
+        
         analysis_id = str(uuid.uuid4())
-        logging.info(f"Generated analysis ID: {analysis_id}")
 
-        # 1. Store the analysis in the SQLite database
-        logging.info("Storing analysis results in the database...")
+        
+        logger.info(f"Storing analysis results for ID: {analysis_id}")
         store_analysis(analysis_id, validated_summary.model_dump(), validated_architecture.model_dump())
         
-        # 2. Index the data for RAG
-        logging.info("Indexing data in RAG service...")
+        logger.info("Indexing data in RAG service...")
         index_in_rag(analysis_id, validated_summary.model_dump(), validated_architecture.model_dump(), parsed_data)
-        logging.info("RAG indexing complete.")
-        # --- END OF CRITICAL SECTION ---
 
-        return {"analysis_id": analysis_id}
+        # Return the architecture as well for immediate review in the frontend
+        return {"analysis_id": analysis_id, "proposed_architecture": validated_architecture.model_dump()}
+
     except Exception as e:
-        logging.error(f"Error in /analyze endpoint: {e}", exc_info=True)
+        logger.error(f"Error in /analyze endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 class MigrateInput(BaseModel):

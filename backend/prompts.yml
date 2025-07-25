@@ -113,23 +113,15 @@ refine_code: |
 
   Now, provide the JSON object containing only the corrected file(s).
 
-
 generate_model: |
   You are an expert C# developer. Generate the complete C# code for a model class based on the provided JSON definition.
-
-  Instructions:
-  - Derive the class name from the `filePath`.
-  - Use the `namespace` exactly as specified.
-  - Create a public property for each item in the `properties` array.
-  - Use the specified `dataType`.
-  - Apply all specified `attributes` as C# data annotations (e.g., [Key], [Required]).
-
-  Input JSON:
-  {context}
-
-  Output Requirements:
-  - Generate only raw C# code (no explanations, no markdown fences).
-  - Use `System.ComponentModel.DataAnnotations` where applicable.
+  Derive the class name from the filePath.
+  Use the namespace exactly as specified.
+  Create a public property for each item in the properties array.
+  Use the specified dataType and apply all attributes as data annotations.
+  Include using statements for System.ComponentModel.DataAnnotations.
+  Output only the raw C# code with no explanations or markdown.
+  Input JSON: {context}
 
 generate_controller: |
   You are an expert ASP.NET Core developer. Generate the complete C# code for a controller class based on the provided JSON definition.
@@ -172,104 +164,65 @@ generate_view: |
   - Generate only raw Razor (.cshtml) code (no explanations, no markdown).
 
 
+generate_interface: |
+  You are an expert C# developer. Generate a C# interface based on the provided JSON definition.
+  Derive the interface name from the filePath (e.g., AuthenticationService.cs becomes IAuthenticationService).
+  Use the exact namespace specified.
+  Create method signatures for each item in the methods array.
+  Output only the raw C# code.
+  File Definition: {context}
+
+generate_service: |
+  You are an expert C# developer. Generate a C# service class that implements its interface.
+  Derive the class name from the filePath.
+  Implement the interface listed in the dependencies.
+  Use constructor-based dependency injection for all dependencies.
+  For each method, provide a full implementation using the description and rag_context for business logic.
+  Output only the raw C# code.
+  File Definition: {context}
+  Supporting RAG Context (Original VB6 Logic): {rag_context}
+
 
 propose_architecture: |
-  You are an expert .NET 9 software architect. Your task is to create a DETAILED and COMPLETE project plan for a modern ASP.NET Core MVC application, based on the provided analysis of a legacy VB6 application.
+  You are an expert .NET 8 software architect specializing in migrating legacy VB6 applications to modern Windows Services.
+  Your task is to create a DETAILED and COMPLETE project plan for a .NET 8 Worker Service based on the provided analysis of a legacy VB6 application.
 
   CRITICAL INSTRUCTIONS:
-  - Comprehensive Coverage: You MUST create a plan that covers ALL major user-facing functionalities identified in the Analysis Summary. This includes, but is not limited to, User Authentication (Login, Signup, Change Password), User Profile Management, and Train Search/Booking/Reservation. Do not omit any features.
-  - Full Project Structure: Your plan MUST include ALL necessary files for a working application: boilerplate (.csproj, Program.cs, _Layout.cshtml, etc.), Models, ViewModels, Interfaces, Services, Controllers, and Views.
-  - Strict JSON Output: Your output MUST be a single, valid JSON object that strictly adheres to the structure in the example.
-
-  DETAILED REQUIREMENTS for each file type:
-  - Models & ViewModels: Populate the `properties` array based on the database schema and form controls from the analysis.
-  - Interfaces & Services: Define methods for every piece of business logic. A login form requires an `Authenticate` method; a signup form requires a `RegisterUser` method.
-  - Controllers: The `methods` array must contain an action method for every user interaction (e.g., a GET and POST for a login form). `dependencies` must list the required services.
-  - Views: The `uiComponents` array must be a list of objects, mapping all controls from the original form.
+  - Your output MUST be a single, valid JSON object. Do not include any surrounding text or code fences.
+  - The project should be structured as a .NET Worker Service.
+  - Identify core business logic from `.bas` modules and propose corresponding dependency-injected `Service` classes.
+  - For any VB6 forms with `Timer` controls or logic that implies a recurring task, propose a `Worker` class that inherits from `BackgroundService`.
+  - The `Worker`'s `ExecuteAsync` method should contain the main loop with a `Task.Delay` to replicate the VB6 timer interval.
+  - Map all inferred database tables to `Model` classes.
+  - Include all necessary boilerplate files: `.csproj`, `Program.cs`, and `appsettings.json`.
 
   Analysis Summary to use:
   ```json
   {summary}
   ```
 
-  Output only valid JSON without any additional text, code blocks, or explanations. Start directly with '{{{{' and end with '}}}}'.
-  Follow this exact structure:
+  Follow this exact JSON structure for your response:
   {{{{
-    "projectName": "RailwayReservationSystem",
-    "files": [
-      {{{{ "filePath": "RailwayReservationSystem.csproj", "type": "csproj" }}}},
-      {{{{ "filePath": "Program.cs", "type": "program" }}}},
-      {{{{ "filePath": "Views/Shared/_Layout.cshtml", "type": "_Layout.cshtml" }}}},
-
-      // --- Example for a ViewModel ---
-      {{{{
-        "filePath": "Models/ViewModels/SignupViewModel.cs", "type": "viewmodel",
-        "properties": [
-          {{{{"name": "Username", "dataType": "string"}}}},
-          {{{{"name": "Password", "dataType": "string"}}}},
-          {{{{"name": "Email", "dataType": "string"}}}}
-        ]
-      }}}},
-
-      // --- Example for an Interface ---
-      {{{{
-        "filePath": "Services/ITrainService.cs", "type": "interface",
-        "methods": [
-          {{{{
-            "name": "SearchTrains",
-            "returnType": "List<TrainDetail>",
-            "parameters": [{{{{"dataType": "string", "name": "source"}}}}]
-          }}}}
-        ]
-      }}}},
-
-      // --- Example for a Service ---
-      {{{{
-        "filePath": "Services/TrainService.cs", "type": "service",
-        "dependencies": ["Data/ApplicationDbContext", "ITrainService"],
-        "methods": [
-          {{{{
-            "name": "SearchTrains",
-            "returnType": "List<TrainDetail>",
-            "parameters": [{{{{"dataType": "string", "name": "source"}}}}]
-          }}}}
-        ]
-      }}}},
-
-      // --- Example for a Controller ---
-      {{{{
-        "filePath": "Controllers/TrainController.cs", "type": "controller",
-        "dependencies": ["Services/ITrainService"],
-        "methods": [
-          {{{{
-            "name": "Search",
-            "returnType": "IActionResult",
-            "parameters": [{{{{"dataType": "SearchViewModel", "name": "model"}}}}],
-            "httpVerb": "POST"
-          }}}}
-        ]
-      }}}}
-    ],
-    "customizations": {{{{"authentication": true}}}},
-    "efCoreContext": "Data/ApplicationDbContext.cs"
+  "projectName": "MigratedWindowsService",
+  "files": [
+  {{{{ "filePath": "MigratedWindowsService.csproj", "type": "csproj" }}}},
+  {{{{ "filePath": "Program.cs", "type": "program" }}}},
+  {{{{ "filePath": "Models/User.cs", "type": "model", "namespace": "MigratedWindowsService.Models", "properties": [{{{{"name": "Id", "dataType": "int", "attributes": ["Key"]}}}}] }}}},
+  {{{{ "filePath": "Services/IAuthenticationService.cs", "type": "interface", "namespace": "MigratedWindowsService.Services", "methods": [{{{{ "name": "ValidateUser", "returnType": "Task<bool>"}}}}] }}}},
+  {{{{ "filePath": "PrimaryWorker.cs", "type": "worker", "namespace": "MigratedWindowsService", "dependencies": ["ILogger<PrimaryWorker>", "Services/IAuthenticationService"] }}}}
+  ],
+  "customizations": {{{{"timerIntervalSeconds": 60}}}}
   }}}}
 
-
-generate_interface: |
-  You are an expert C# developer. Generate a C# interface based on the provided JSON definition.
-  - Derive the interface name from the `filePath` (e.g., `TrainService.cs` becomes `ITrainService`).
-  - Use the exact namespace specified in the JSON.
-  - Create method signatures for each item in the `methods` array, without method bodies.
-  - Output only the raw C# code, including namespace and interface declaration.
-  File Definition: {context}
-
-generate_service: |
-  You are an expert C# developer. Generate a C# service class that implements the specified interface.
-  - Derive the class name from the `filePath` (e.g., `TrainService.cs` becomes `TrainService`).
-  - Use the exact namespace specified in the JSON.
-  - Implement the interface listed in the `dependencies` array.
-  - Use constructor-based dependency injection for dependencies like the DbContext.
-  - For each method in the `methods` array, provide a full implementation using the `description` and `rag_context` for business logic.
-  - Output only the raw C# code, including namespace, class, and interface implementation.
+generate_worker: |
+  You are an expert .NET developer. Generate the complete C# code for a Worker Service class that inherits from BackgroundService.
+  The class name should be derived from the filePath.
+  Use the exact namespace specified.
+  Inject all dependencies through the constructor.
+  In the ExecuteAsync method, create a while (!stoppingToken.IsCancellationRequested) loop.
+  Inside the loop, call the necessary service methods based on the description and rag_context.
+  End the loop with await Task.Delay(TimeSpan.FromSeconds(60), stoppingToken);. Use the interval from the project's customizations if available.
+  Wrap the core logic in a try-catch block that logs any exceptions.
+  Output only the raw C# code.
   File Definition: {context}
   Supporting RAG Context (Original VB6 Logic): {rag_context}

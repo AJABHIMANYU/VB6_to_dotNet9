@@ -1,4 +1,3 @@
-# ai_utils.py
 
 import os
 from openai import AzureOpenAI
@@ -12,7 +11,7 @@ from typing import List, Dict, Any, Optional, Union
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-
+logger = logging.getLogger(__name__) 
 # Load .env for credentials
 load_dotenv()
 
@@ -28,22 +27,9 @@ embedding_deployment = os.getenv("AZURE_EMBEDDING_DEPLOYMENT_NAME", "").strip()
 embedding_api_version = os.getenv("AZURE_EMBEDDING_API_VERSION", "").strip()
 embedding_model = os.getenv("AZURE_EMBEDDING_MODEL_NAME", "").strip()
 
-# Validate environment variables
-if not endpoint or not endpoint.startswith("https://"):
-    logging.error(f"Invalid AZURE_ENDPOINT: '{endpoint}'. Must start with 'https://' and be non-empty.")
-    raise ValueError("AZURE_ENDPOINT is missing or invalid")
-if not api_key:
-    logging.error("AZURE_API_KEY is missing.")
-    raise ValueError("AZURE_API_KEY is missing")
-if not embedding_endpoint or not embedding_endpoint.startswith("https://"):
-    logging.error(f"Invalid AZURE_EMBEDDING_ENDPOINT: '{embedding_endpoint}'. Must start with 'https://' and be non-empty.")
-    raise ValueError("AZURE_EMBEDDING_ENDPOINT is missing or invalid")
-if not embedding_api_version:
-    logging.error("AZURE_EMBEDDING_API_VERSION is missing.")
-    raise ValueError("AZURE_EMBEDDING_API_VERSION is missing")
-if not embedding_model:
-    logging.error("AZURE_EMBEDDING_MODEL_NAME is missing.")
-    raise ValueError("AZURE_EMBEDDING_MODEL_NAME is missing")
+# Validate environment variables (Ensure these are set in your .env file)
+if not all([endpoint, api_key, embedding_endpoint, embedding_deployment, embedding_api_version, embedding_model]):
+    raise ValueError("One or more required Azure environment variables are missing.")
 
 # Initialize clients
 client = AzureOpenAI(
@@ -69,172 +55,93 @@ def generate_embedding(text):
         logging.error(f"Failed to generate embedding: {e}")
         raise
 
+def clean_and_parse_json(raw_content: str) -> dict:
+    """A robust function to extract and parse JSON from LLM responses."""
+    logging.info(f"Raw LLM content for parsing: {raw_content}")
+    
+    # Attempt to find JSON within code fences
+    match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', raw_content, re.MULTILINE)
+    if match:
+        content_to_parse = match.group(1).strip()
+    else:
+        # If no fences, find the first '{' and last '}'
+        start = raw_content.find('{')
+        end = raw_content.rfind('}') + 1
+        if start != -1 and end != 0:
+            content_to_parse = raw_content[start:end].strip()
+        else:
+            content_to_parse = raw_content.strip()
+
+    logging.info(f"Cleaned content for JSON parsing: {content_to_parse}")
+    try:
+        return json.loads(content_to_parse)
+    except json.JSONDecodeError as e:
+        logging.error(f"Failed to parse JSON: {e}. Content was: {content_to_parse}")
+        raise ValueError(f"Failed to parse LLM JSON response. Raw content was: {raw_content}")
+
 def propose_architecture_with_llm(summary: dict) -> dict:
-    prompt = prompts['propose_architecture'].format(
-        summary=summary,
-        examples="Example: Map form to Controller.cs and View.cshtml; include auth if login detected."
-    )
+    prompt = prompts['propose_architecture'].format(summary=json.dumps(summary, indent=2))
+    logger.info("="*20 + " PROPOSING ARCHITECTURE " + "="*20)
+    logger.info(f"Sending prompt for architecture proposal. Prompt length: {len(prompt)} characters.")
+    logger.debug(f"Architecture Prompt:\n{prompt}")
+    logger.info("="*68)
+    
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "Propose .NET 9 MVC structure in JSON."},
+            {"role": "system", "content": "You are a .NET 8 Worker Service architect. Respond with a single, valid JSON object."},
             {"role": "user", "content": prompt}
-        ]
+        ],
+        response_format={"type": "json_object"}
     )
     raw_content = response.choices[0].message.content
-    logging.info(f"Raw LLM content: {raw_content}")
-    
-    # Extract JSON content between code fences, handling optional 'json' label
-    match = re.search(r'```(?:json)?\s*\n([\s\S]*?)\n```', raw_content, re.MULTILINE)
-    if match:
-        cleaned_content = match.group(1).strip()
-    else:
-        cleaned_content = raw_content.strip()
-        logging.warning("No code fences found in LLM response; using raw content")
-    
-    logging.info(f"Cleaned content: {cleaned_content}")
-    try:
-        return json.loads(cleaned_content)
-    except json.JSONDecodeError as e:
-        logging.error(f"Failed to parse LLM response: {e} - Cleaned content: {cleaned_content}")
-        # Attempt to extract valid JSON subset
-        try:
-            start = cleaned_content.find('{')
-            end = cleaned_content.rfind('}') + 1
-            if start != -1 and end != -1:
-                subset = cleaned_content[start:end]
-                return json.loads(subset)
-            else:
-                raise ValueError(f"No valid JSON found in response: {cleaned_content}")
-        except json.JSONDecodeError as e2:
-            raise ValueError(f"Failed to parse JSON subset: {e2} - Cleaned content: {cleaned_content} - Raw: {raw_content}")
+    logger.info(f"Received architecture proposal from LLM. Content length: {len(raw_content)} characters.")
+    # Since we use json_object mode, direct parsing should work.
+    return json.loads(raw_content)
 
 def analyze_single_vb6_file_with_llm(file_data: dict, schema: dict) -> dict:
-    """Analyzes a single VB6 file's data using an LLM to avoid token limits."""
-    
-    # We remove the 'content' from the main display in the prompt for brevity,
-    # but the LLM still gets it as part of the file_data object.
-    # A more advanced version might summarize the content if it's too long.
     prompt = prompts['analyze_vb6_single_file'].format(
         file_data=json.dumps(file_data, indent=2),
         schema=json.dumps(schema, indent=2)
     )
-    
+
+    logger.info("-" * 20 + f" ANALYZING FILE: {file_data.get('file')} " + "-" * 20)
+    logger.info(f"Sending prompt for file analysis. Prompt length: {len(prompt)} characters.")
+
     response = client.chat.completions.create(
-        model="gpt-4o", # Or whichever model you are using
+        model="gpt-4o",
         messages=[
-            {"role": "system", "content": "You are a VB6 to .NET expert. You will receive data for a single VB6 file and must return a single, valid JSON object with its analysis."},
+            {"role": "system", "content": "You are a VB6 to .NET expert. Return a single, valid JSON object with your analysis."},
             {"role": "user", "content": prompt}
         ],
-        # It's good practice to ask the model to respond in JSON mode if the API supports it
         response_format={"type": "json_object"},
     )
-    
     raw_content = response.choices[0].message.content
-    logging.info(f"LLM analysis for file '{file_data.get('file')}':\n{raw_content}")
-    
-    try:
-        # Since we are using response_format="json_object", the content should be a valid JSON string
-        return json.loads(raw_content)
-    except json.JSONDecodeError as e:
-        # Fallback for older models or if JSON mode fails
-        logging.error(f"Failed to parse LLM JSON response for file '{file_data.get('file')}': {e}. Content: {raw_content}")
-        # Add your existing regex/cleanup logic here if needed as a fallback
-        match = re.search(r'```(?:json)?\s*\n([\s\S]*?)\n```', raw_content, re.MULTILINE)
-        if match:
-            cleaned_content = match.group(1).strip()
-            return json.loads(cleaned_content)
-        raise ValueError(f"Could not extract valid JSON for file '{file_data.get('file')}'.")
-
-def infer_schema_with_llm(ado_queries: list) -> dict:
-    prompt = prompts['infer_schema'].format(
-        ado_queries=ado_queries,
-        examples="Example: From 'SELECT * FROM Users', infer table Users with columns Id, Name."
-    )
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "system", "content": "Infer MySQL schema from ADO queries in JSON."}, {"role": "user", "content": prompt}]
-    )
-    raw_content = response.choices[0].message.content
-    logging.info(f"Raw LLM content: {raw_content}")
-    
-    match = re.search(r'```(?:json)?\s*\n([\s\S]*?)\n```', raw_content, re.MULTILINE)
-    if match:
-        cleaned_content = match.group(1).strip()
-    else:
-        cleaned_content = raw_content.strip()
-        logging.warning("No code fences found in LLM response; using raw content")
-    
-    logging.info(f"Cleaned content: {cleaned_content}")
-    try:
-        return json.loads(cleaned_content)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse LLM response: {e} - Cleaned content: {cleaned_content} - Raw: {raw_content}")
-
-def generate_file_with_llm(file_type: str, context: dict):
-    prompt = prompts['generate_file'].format(
-        file_type=file_type,
-        context=context,
-        examples="Example: Convert VB6 form to .cshtml with Razor syntax."
-    )
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "system", "content": "Generate .NET 9 code in strict format."}, {"role": "user", "content": prompt}]
-    )
-    return response.choices[0].message.content
+    logger.info(f"LLM analysis for file '{file_data.get('file')}' received. Content length: {len(raw_content)} characters.")
+    logger.info(f"Raw Analysis JSON:\n{raw_content}")
+    logger.info("-" * (42 + len(file_data.get('file'))))
+    return json.loads(raw_content)
 
 def refine_with_llm(files: dict, errors: list):
     prompt = prompts['refine_code'].format(
-        files=files,
-        errors=errors,
-        examples="Fix build error: Adjust namespace in Controller.cs."
+        files=json.dumps(files, indent=2),
+        errors="\n".join(errors)
     )
     response = client.chat.completions.create(
         model="gpt-4o",
-        messages=[{"role": "system", "content": "Refine .NET code to fix errors."}, {"role": "user", "content": prompt}]
+        messages=[
+            {"role": "system", "content": "Refine .NET code to fix build errors. Respond in valid JSON format."},
+            {"role": "user", "content": prompt}
+        ]
     )
     raw_content = response.choices[0].message.content
-    logging.info(f"Raw LLM content: {raw_content}")
-    
-    match = re.search(r'```(?:json)?\s*\n([\s\S]*?)\n```', raw_content, re.MULTILINE)
-    if match:
-        cleaned_content = match.group(1).strip()
-    else:
-        cleaned_content = raw_content.strip()
-        logging.warning("No code fences found in LLM response; using raw content")
-    
-    logging.info(f"Cleaned content: {cleaned_content}")
-    try:
-        return json.loads(cleaned_content)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse LLM response: {e} - Cleaned content: {cleaned_content} - Raw: {raw_content}")
+    return clean_and_parse_json(raw_content)
 
-
+# --- NEW AND REFACTORED GENERATORS ---
 
 def generate_model_with_llm(context: dict) -> str:
     """Generates C# code for a model class."""
     prompt = prompts['generate_model'].format(context=json.dumps(context, indent=2))
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return response.choices[0].message.content
-
-def generate_controller_with_llm(context: dict, rag_context: str) -> str:
-    """Generates C# code for a controller class."""
-    prompt = prompts['generate_controller'].format(
-        context=json.dumps(context, indent=2),
-        rag_context=rag_context
-    )
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return response.choices[0].message.content
-
-def generate_view_with_llm(context: dict) -> str:
-    """Generates Razor .cshtml code for a view."""
-    prompt = prompts['generate_view'].format(context=json.dumps(context, indent=2))
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": prompt}]
@@ -262,67 +169,80 @@ def generate_service_with_llm(context: dict, rag_context: str) -> str:
     )
     return response.choices[0].message.content
 
+def generate_worker_with_llm(context: dict, rag_context: str) -> str:
+    """Generates C# code for a BackgroundService worker class."""
+    prompt = prompts['generate_worker'].format(
+        context=json.dumps(context, indent=2),
+        rag_context=rag_context
+    )
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content
 
 
-
-
-# Pydantic models
-# --- CORRECTLY ORDERED PYDANTIC MODELS ---
-# Step 1: Define the "sub-models" FIRST.
-
-class ModelProperty(BaseModel):
-    name: str
-    data_type: str = Field(alias="dataType")
-    attributes: List[str] = Field(default=[])
-
-class MethodParameter(BaseModel):
-    data_type: str = Field(alias="dataType")
-    name: str
-
-class ControllerMethod(BaseModel):
-    name: str
-    return_type: str = Field(alias="returnType", default="IActionResult")
-    parameters: List[MethodParameter] = Field(default=[])
-    http_verb: str = Field(alias="httpVerb", default="GET")
-    description: Optional[str] = None
-
-
-# --- FIX for Error 2: Make UIComponent more flexible ---
-class UIComponentProperties(BaseModel):
-    """Handles the nested properties dictionary the AI is now sending."""
-    label: Optional[str] = None
-    name: Optional[str] = None
-    onclick: Optional[str] = None
-    type: Optional[str] = None # For things like <input type="password">
-    value: Optional[str] = None
-
-class UIComponent(BaseModel):
+def summarize_vb6_code_with_llm(code: str) -> str:
     """
-    A highly flexible model that can handle multiple structures the AI might produce.
+    Takes a string of VB6 code and returns a concise summary of its purpose,
+    key functions, and important logic.
     """
-    # Accept both 'componentType' from our prompt and 'type' which the AI seems to prefer.
-    component_type: Optional[str] = Field(default=None, alias="componentType")
-    type: Optional[str] = None 
-    
-    # Handle the nested properties structure.
-    properties: Optional[UIComponentProperties] = None
-    
-    # Keep the old top-level fields for backwards compatibility or if the AI uses them.
-    label: Optional[str] = None
-    binds_to: Optional[str] = Field(default=None, alias="bindsTo")
-    attributes: List[Any] = Field(default=[]) # Make attributes very flexible
+    logging.info(f"Summarizing VB6 code of length {len(code)}...")
+    prompt = f"""
+    You are an expert VB6 analyst. Summarize the following VB6 code. Focus on:
+    1. The overall purpose of the code.
+    2. Key public functions and subroutines and what they do.
+    3. Any database interactions (ADO queries).
+    4. Any important UI elements or timer controls mentioned.
+    5. Any Win32 API declarations (`Declare Function`).
 
-# Original models (FileInfo, AnalysisSummary)
+    Do not provide a line-by-line explanation. Provide a high-level summary.
+
+    VB6 Code:
+    ```vb
+    {code}
+    ```
+    """
+    
+    # --- LOGGING ADDED ---
+    logger.info("-" * 20 + " SUMMARIZING LARGE FILE " + "-" * 20)
+    logger.info(f"Code length: {len(code)} characters. Prompt length: {len(prompt)} characters.")
+    # --- END LOGGING ---
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o", # Or a cheaper/faster model like gpt-3.5-turbo if available
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1, # Low temperature for factual summarization
+        )
+        summary = response.choices[0].message.content
+        logger.info(f"Generated summary. Length: {len(summary)} characters.")
+        logger.info("-" * 62)        
+        return summary
+    except Exception as e:
+        logging.error(f"Failed to summarize VB6 code: {e}")
+        # Return a simple message indicating failure, so the process can continue
+        return "Error: Could not summarize code."
+
+
+# ---------------------------------------------------
+# --- PYDANTIC MODELS FOR WINDOWS SERVICE TARGET ---
+# ---------------------------------------------------
+
+class AnalysisInput(BaseModel):
+    # This model is now defined in main.py, keeping it here for reference is fine
+    # but the primary one will be in main.py
+    vb6_project_path: Optional[str] = None
+
 class FileInfo(BaseModel):
     file_name: Optional[str] = Field(default=None, alias="file")
     purpose: str
     functionality: str
     dependencies: List[str] = Field(default=[])
     net_mapping: Optional[Dict[str, Optional[str]]] = Field(default={}, alias="netMappings")
-    controls: List[str] = Field(default=[], description="UI controls")
-    events: List[str] = Field(default=[], description="Events")
+    controls: List[str] = Field(default=[], description="UI controls (useful for inferring timers)")
+    events: List[str] = Field(default=[], description="Events (useful for inferring timers)")
     ado_queries: List[str] = Field(default=[], description="ADO queries", alias="adoQueries")
-
     model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
 
 class AnalysisSummary(BaseModel):
@@ -330,34 +250,38 @@ class AnalysisSummary(BaseModel):
     overall_purpose: Optional[str] = Field(default="Generated summary", description="Overall project purpose")
     model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
 
+class ModelProperty(BaseModel):
+    name: str
+    data_type: str = Field(alias="dataType")
+    attributes: List[str] = Field(default=[])
 
+class MethodParameter(BaseModel):
+    # This allows the field to be populated from JSON keys "dataType" OR "type"
+    data_type: str = Field(alias="type", validation_alias="dataType") 
+    name: str
 
-class AnalysisInput(BaseModel):
-    vb6_project_path: str
-    vb6_project_path: str
-
+class ServiceMethod(BaseModel):
+    name: str
+    # Make return_type optional and give it a default value
+    return_type: Optional[str] = Field(alias="returnType", default="void")
+    # This Union allows the list to contain either a MethodParameter object or a string
+    parameters: List[Union[MethodParameter, str]] = Field(default=[])
 class TargetFile(BaseModel):
     file_path: str = Field(alias="filePath")
-    type: str
+    type: str  # e.g., "worker", "service", "model", "interface", "program", "csproj"
     namespace: Optional[str] = None
     dependencies: List[str] = Field(default=[])
-    
-    properties: Optional[List[ModelProperty]] = Field(default=None)
-    methods: Optional[List[ControllerMethod]] = Field(default=None)
-    ui_components: Optional[List[UIComponent]] = Field(default=None, alias="uiComponents")
+    description: Optional[str] = None # For workers
+
+    # Type-specific properties
+    properties: Optional[List[ModelProperty]] = None # For models
+    methods: Optional[List[ServiceMethod]] = None # For services/interfaces
 
     model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
 
 class TargetArchitecture(BaseModel):
-    project_name: str = Field(alias="projectName", default="MigratedApp")
+    project_name: str = Field(alias="projectName", default="MigratedWindowsService")
     files: List[TargetFile]
     customizations: Dict[str, Any] = Field(default={})
-    ef_core_context: Optional[str] = Field(default=None, alias="efCoreContext")
-
-    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
-    project_name: str = Field(alias="projectName", default="MigratedApp")
-    files: List[TargetFile]
-    customizations: Dict[str, Any] = Field(default={})
-    ef_core_context: Optional[str] = Field(default=None, alias="efCoreContext")
 
     model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
